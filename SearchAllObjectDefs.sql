@@ -13,10 +13,10 @@ SELECT  @Case = 0 , -- Set to 1 for case-sensitive search
         
 SELECT  @Search = '%' + @Search + '%'
 
-IF OBJECT_ID('tempdb..#ResultsTable') IS NOT NULL
-    DROP TABLE #ResultsTable
+IF OBJECT_ID('tempdb..##ResultsTable') IS NOT NULL
+    DROP TABLE ##ResultsTable
 
-CREATE TABLE #ResultsTable
+CREATE TABLE ##ResultsTable
     (
       intRow INT IDENTITY(1, 1) ,
       txtDatabase VARCHAR(100) NULL ,
@@ -24,13 +24,14 @@ CREATE TABLE #ResultsTable
       txtType VARCHAR(5) NULL
     )
 
-INSERT  INTO #ResultsTable
+INSERT  INTO ##ResultsTable
         ( txtDatabase )
         SELECT  'Search for: ' + @Search
         
+SELECT  @Search = '%' + @Search + '%'
+
 IF OBJECT_ID('tempdb..#ObjectTypes') IS NOT NULL
     DROP TABLE #ObjectTypes
-    
 CREATE TABLE #ObjectTypes
     (
       txtType VARCHAR(5) NULL ,
@@ -75,7 +76,8 @@ INSERT  INTO #Databases
         )
         SELECT  name
         FROM    sys.sysdatabases
-        WHERE   dbid > 4 -- id <= 4 are system databases
+        WHERE   dbid > 4
+                AND name <> 'DSN_Archive'
 
 SELECT  @Cnt = @@IDENTITY
 
@@ -85,29 +87,44 @@ WHILE @Looper <= @Cnt
         FROM    #Databases
         WHERE   intDB = @Looper
         
-        SELECT  @Select = 'INSERT INTO #ResultsTable (txtDatabase, txtName, txtType) '
+        SELECT  @Select = 'INSERT INTO ##ResultsTable (txtDatabase, txtName, txtType) '
                 + 'SELECT DISTINCT ' + CHAR(39) + @DB + CHAR(39)
-                + ', Obj.name, Obj.type FROM ' + @DB
-                + '.dbo.sysobjects Obj (NOLOCK) INNER JOIN ' + @DB
-                + '.dbo.syscomments Cmt (NOLOCK) on Obj.id = Cmt.id WHERE Cmt.text LIKE '
+                + ', SO.Name, SO.Type FROM ' + @DB
+                + '.dbo.sysobjects SO (NOLOCK) INNER JOIN ' + @DB
+                + '.dbo.syscomments SC (NOLOCK) on SO.Id = SC.ID
+                INNER JOIN #ObjectTypes ON #ObjectTypes.txtType = SO.type WHERE SC.Text LIKE '
                 + CHAR(39) + @Search + CHAR(39)
         
         IF @Case = 1
             SELECT  @Select = @Select + ' Collate Latin1_General_CS_AS '
         
-        SELECT  @Select = @Select + ' ORDER BY Obj.name'
-
-        SELECT  @Looper = @Looper + 1
+        SELECT  @Select = @Select + ' ORDER BY SO.Name'
         
         EXEC sp_executesql @Select
         
+        SELECT  @Select = 'INSERT INTO ##ResultsTable (txtDatabase, txtName, txtType) '
+                + 'SELECT DISTINCT ' + CHAR(39) + @DB + CHAR(39)
+                + ', SO.Name, SO.xtype FROM ' + @DB
+                + '.dbo.sysobjects SO INNER JOIN #ObjectTypes ON #ObjectTypes.txtType = SO.xtype WHERE SO.name LIKE '
+                + CHAR(39) + @Search + CHAR(39)
+        
+        IF @Case = 1
+            SELECT  @Select = @Select + ' Collate Latin1_General_CS_AS '
+        
+        SELECT  @Select = @Select + ' ORDER BY SO.name'
+                
+        EXEC sp_executesql @Select
+        
+        SELECT  @Looper = @Looper + 1
     END
 
-
-SELECT  txtDatabase, txtName, txtDesc
-FROM    #ResultsTable
-        LEFT OUTER JOIN #ObjectTypes ON #ObjectTypes.txtType = #ResultsTable.txtType
+SELECT  txtDatabase ,
+        txtName ,
+        txtDesc ,
+        ##ResultsTable.txtType
+FROM    ##ResultsTable
+        LEFT OUTER JOIN #ObjectTypes ON #ObjectTypes.txtType = ##ResultsTable.txtType
 ORDER BY intRow
 
-DROP TABLE #Databases, #ObjectTypes, #ResultsTable
+DROP TABLE #Databases, #ObjectTypes, ##ResultsTable
 
